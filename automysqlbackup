@@ -458,10 +458,10 @@ parse_configuration () {
 	opt_dbstatus=( '--status' )
 
     [[ "${CONFIG_mysql_dump_usessl}" = "yes" ]] 		&& {
-	  opt=( "${opt[@]}" '--ssl-mode' )
-	  mysql_opt=( "${mysql_opt[@]}" '--ssl-mode' )
-	  opt_fullschema=( "${opt_fullschema[@]}" '--ssl-mode' )
-	  opt_dbstatus=( "${opt_dbstatus[@]}" '--ssl-mode' )
+	  opt=( "${opt[@]}" '--ssl-mode=PREFERRED' )
+	  mysql_opt=( "${mysql_opt[@]}" '--ssl-mode=PREFERRED' )
+	  opt_fullschema=( "${opt_fullschema[@]}" '--ssl-mode=PREFERRED' )
+	  opt_dbstatus=( "${opt_dbstatus[@]}" '--ssl-mode=PREFERRED' )
     }
     [[ "${CONFIG_mysql_dump_master_data}" ]] && (( ${CONFIG_mysql_dump_master_data} == 1 || ${CONFIG_mysql_dump_master_data} == 2 )) && { opt=( "${opt[@]}" "--master-data=${CONFIG_mysql_dump_master_data}" );}
     [[ "${CONFIG_mysql_dump_single_transaction}" = "yes" ]]	&& {
@@ -2262,4 +2262,3 @@ elif (( $# == 0 )) && (( ${#opt_flags[@]} == 0 )); then
 fi
 
 # END __main
-exit 0 #systemd need exit 0
