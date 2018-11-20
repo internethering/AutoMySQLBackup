@@ -2262,3 +2262,4 @@ elif (( $# == 0 )) && (( ${#opt_flags[@]} == 0 )); then
 fi
 
 # END __main
+exit 0 #systemd need exit 0
