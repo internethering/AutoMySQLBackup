@@ -458,10 +458,17 @@ parse_configuration () {
 	opt_dbstatus=( '--status' )
 
     [[ "${CONFIG_mysql_dump_usessl}" = "yes" ]] 		&& {
-	  opt=( "${opt[@]}" '--ssl-mode=PREFERRED' )
-	  mysql_opt=( "${mysql_opt[@]}" '--ssl-mode=PREFERRED' )
-	  opt_fullschema=( "${opt_fullschema[@]}" '--ssl-mode=PREFERRED' )
-	  opt_dbstatus=( "${opt_dbstatus[@]}" '--ssl-mode=PREFERRED' )
+      if [[ "${CONFIG_mysql8}" = "yes" ]]; then
+		    opt=( "${opt[@]}" '--ssl-mode=PREFERRED' )
+	      mysql_opt=( "${mysql_opt[@]}" '--ssl-mode=PREFERRED' )
+	      opt_fullschema=( "${opt_fullschema[@]}" '--ssl-mode=PREFERRED' )
+	      opt_dbstatus=( "${opt_dbstatus[@]}" '--ssl-mode=PREFERRED' )
+	    else
+		    opt=( "${opt[@]}" '--ssl' )
+	      mysql_opt=( "${mysql_opt[@]}" '--ssl' )
+	      opt_fullschema=( "${opt_fullschema[@]}" '--ssl' )
+	      opt_dbstatus=( "${opt_dbstatus[@]}" '--ssl' )
+	    fi
     }
     [[ "${CONFIG_mysql_dump_master_data}" ]] && (( ${CONFIG_mysql_dump_master_data} == 1 || ${CONFIG_mysql_dump_master_data} == 2 )) && { opt=( "${opt[@]}" "--master-data=${CONFIG_mysql_dump_master_data}" );}
     [[ "${CONFIG_mysql_dump_single_transaction}" = "yes" ]]	&& {
