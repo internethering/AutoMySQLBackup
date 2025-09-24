@@ -553,28 +553,28 @@ dbstatus() {
   if (( $CONFIG_dryrun )); then
     case "${CONFIG_mysql_dump_compression}" in
 	'gzip')
-	  echo "dry-running: mysqlshow ${authentication} ${opt_dbstatus[@]} | gzip_compression > ${1}${suffix}";
+	  echo "dry-running: ${CONFIG_mysql_show} ${authentication} ${opt_dbstatus[@]} | gzip_compression > ${1}${suffix}";
 	  ;;
 	'bzip2')
-	  echo "dry-running: mysqlshow ${authentication} ${opt_dbstatus[@]} | bzip2_compression > ${1}${suffix}";
+	  echo "dry-running: ${CONFIG_mysql_show} ${authentication} ${opt_dbstatus[@]} | bzip2_compression > ${1}${suffix}";
 	  ;;
 	*)
-	  echo "dry-running: mysqlshow ${authentication} ${opt_dbstatus[@]} > ${1}${suffix}";
+	  echo "dry-running: ${CONFIG_mysql_show} ${authentication} ${opt_dbstatus[@]} > ${1}${suffix}";
 	  ;;
     esac
     return 0;
   else
     case "${CONFIG_mysql_dump_compression}" in
 	'gzip')
-	  mysqlshow ${authentication} "${opt_dbstatus[@]}" | gzip_compression > "${1}${suffix}";
+	  ${CONFIG_mysql_show} ${authentication} "${opt_dbstatus[@]}" | gzip_compression > "${1}${suffix}";
 	  return $?
 	  ;;
 	'bzip2')
-	  mysqlshow ${authentication} "${opt_dbstatus[@]}" | bzip2_compression > "${1}${suffix}";
+	  ${CONFIG_mysql_show} ${authentication} "${opt_dbstatus[@]}" | bzip2_compression > "${1}${suffix}";
 	  return $?
 	  ;;
 	*)
-	  mysqlshow ${authentication} "${opt_dbstatus[@]}" > "${1}${suffix}";
+	  ${CONFIG_mysql_show} ${authentication} "${opt_dbstatus[@]}" > "${1}${suffix}";
 	  return $?
 	  ;;
     esac
