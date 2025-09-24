@@ -55,6 +55,8 @@ let "N_backup_local_nofiles=0x20"
 # @info:	Default configuration options.
 # @deps:	(none)
 load_default_config() {
+  CONFIG_mysql="/usr/bin/mysql"
+  CONFIG_mysql_dump="/usr/bin/mysqldump"
   CONFIG_configfile="/etc/automysqlbackup/automysqlbackup.conf"
   CONFIG_backup_dir='/var/backup/db'
   CONFIG_multicore='yes'
@@ -530,7 +532,7 @@ parse_configuration () {
 	  db=${i%.*}
 	  table=${i#"$db".}
 	  r='\*'; [[ "$i" =~ $r ]] || { tmp[z++]="$i"; continue; }
-	  while read -r; do tmp[z++]="${db}.${REPLY}"; done < <(mysql ${authentication} "${mysql_opt[@]}" --batch --skip-column-names -e "select table_name from information_schema.tables where table_schema='${db}' and table_name like '${table//\*/%}';")
+	  while read -r; do tmp[z++]="${db}.${REPLY}"; done < <(${CONFIG_mysql} ${authentication} "${mysql_opt[@]}" --batch --skip-column-names -e "select table_name from information_schema.tables where table_schema='${db}' and table_name like '${table//\*/%}';")
 	done
 	for l in "${tmp[@]}"; do echo "exclude $l";done
 	CONFIG_table_exclude=("${tmp[@]}")
@@ -587,28 +589,28 @@ fullschema () {
   if (( $CONFIG_dryrun )); then
     case "${CONFIG_mysql_dump_compression}" in
 	'gzip')
-	  echo "dry-running: mysqldump ${authentication} ${opt_fullschema[@]} | gzip_compression > ${1}${suffix}";
+	  echo "dry-running: ${CONFIG_mysql_dump} ${authentication} ${opt_fullschema[@]} | gzip_compression > ${1}${suffix}";
 	  ;;
 	'bzip2')
-	  echo "dry-running: mysqldump ${authentication} ${opt_fullschema[@]} | bzip2_compression > ${1}${suffix}";
+	  echo "dry-running: ${CONFIG_mysql_dump} ${authentication} ${opt_fullschema[@]} | bzip2_compression > ${1}${suffix}";
 	  ;;
 	*)
-	  echo "dry-running: mysqldump ${authentication} ${opt_fullschema[@]} > ${1}${suffix}";
+	  echo "dry-running: ${CONFIG_mysql_dump} ${authentication} ${opt_fullschema[@]} > ${1}${suffix}";
 	  ;;
     esac
     return 0;
   else
     case "${CONFIG_mysql_dump_compression}" in
 	'gzip')
-	  mysqldump ${authentication} "${opt_fullschema[@]}" | gzip_compression > "${1}${suffix}";
+	  ${CONFIG_mysql_dump} ${authentication} "${opt_fullschema[@]}" | gzip_compression > "${1}${suffix}";
 	  return $?
 	  ;;
 	'bzip2')
-	  mysqldump ${authentication} "${opt_fullschema[@]}" | bzip2_compression > "${1}${suffix}";
+	  ${CONFIG_mysql_dump} ${authentication} "${opt_fullschema[@]}" | bzip2_compression > "${1}${suffix}";
 	  return $?
 	  ;;
 	*)
-	  mysqldump ${authentication} "${opt_fullschema[@]}" > "${1}${suffix}";
+	  ${CONFIG_mysql_dump} ${authentication} "${opt_fullschema[@]}" > "${1}${suffix}";
 	  return $?
 	  ;;
     esac
@@ -726,13 +728,13 @@ process_dbs() {
 		uid="${uid:-8:8}"
 		case "${CONFIG_mysql_dump_compression}" in
 		'gzip')
-		  mysqldump ${authentication} "${opt[@]}" "$@" | gzip_compression > "$cfname";
+		  ${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@" | gzip_compression > "$cfname";
 		  ;;
 		'bzip2')
-		  mysqldump ${authentication} "${opt[@]}" "$@" | bzip2_compression > "$cfname";
+		  ${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@" | bzip2_compression > "$cfname";
 		  ;;
 		*)
-		  mysqldump ${authentication} "${opt[@]}" "$@" > "$cfname";
+		  ${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@" > "$cfname";
 		  ;;
 		esac
 		add_manifest_entry "$manifest_file" "$cfname" "$pid" "$db" && parse_manifest "$manifest_file" && cp -al "$cfname" "${CONFIG_backup_dir}"/latest/ && echo "Generated master backup $cfname" && return 0 || return 1
@@ -745,29 +747,29 @@ process_dbs() {
 		case "${CONFIG_mysql_dump_compression}" in
 		'gzip')
 		  if (( $filename_flags & $filename_flag_gz )); then
-			diff <(gzip_compression -dc "${manifest_latest_master_entry[0]}") <(mysqldump ${authentication} "${opt[@]}" "$@") | gzip_compression > "$cfname";
+			diff <(gzip_compression -dc "${manifest_latest_master_entry[0]}") <(${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@") | gzip_compression > "$cfname";
 		  elif (( $filename_flags & $filename_flag_bz2 )); then
-			diff <(bzip2_compression -dc "${manifest_latest_master_entry[0]}") <(mysqldump ${authentication} "${opt[@]}" "$@") | gzip_compression > "$cfname";
+			diff <(bzip2_compression -dc "${manifest_latest_master_entry[0]}") <(${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@") | gzip_compression > "$cfname";
 		  else
-			diff "${manifest_latest_master_entry[0]}" <(mysqldump ${authentication} "${opt[@]}" "$@") | gzip_compression > "$cfname";
+			diff "${manifest_latest_master_entry[0]}" <(${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@") | gzip_compression > "$cfname";
 		  fi
 		  ;;
 		'bzip2')
 		  if (( $filename_flags & $filename_flag_gz )); then
-			diff <(gzip_compression -dc "${manifest_latest_master_entry[0]}") <(mysqldump ${authentication} "${opt[@]}" "$@") | bzip2_compression > "$cfname";
+			diff <(gzip_compression -dc "${manifest_latest_master_entry[0]}") <(${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@") | bzip2_compression > "$cfname";
 		  elif (( $filename_flags & $filename_flag_bz2 )); then
-			diff <(bzip2_compression -dc "${manifest_latest_master_entry[0]}") <(mysqldump ${authentication} "${opt[@]}" "$@") | bzip2_compression > "$cfname";
+			diff <(bzip2_compression -dc "${manifest_latest_master_entry[0]}") <(${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@") | bzip2_compression > "$cfname";
 		  else
-			diff "${manifest_latest_master_entry[0]}" <(mysqldump ${authentication} "${opt[@]}" "$@") | bzip2_compression > "$cfname";
+			diff "${manifest_latest_master_entry[0]}" <(${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@") | bzip2_compression > "$cfname";
 		  fi
 		  ;;
 		*)
 		  if (( $filename_flags & $filename_flag_gz )); then
-			diff <(gzip_compression -dc "${manifest_latest_master_entry[0]}") <(mysqldump ${authentication} "${opt[@]}" "$@") > "$cfname";
+			diff <(gzip_compression -dc "${manifest_latest_master_entry[0]}") <(${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@") > "$cfname";
 		  elif (( $filename_flags & $filename_flag_bz2 )); then
-			diff <(bzip2_compression -dc "${manifest_latest_master_entry[0]}") <(mysqldump ${authentication} "${opt[@]}" "$@") > "$cfname";
+			diff <(bzip2_compression -dc "${manifest_latest_master_entry[0]}") <(${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@") > "$cfname";
 		  else
-			diff "${manifest_latest_master_entry[0]}" <(mysqldump ${authentication} "${opt[@]}" "$@") > "$cfname";
+			diff "${manifest_latest_master_entry[0]}" <(${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@") > "$cfname";
 		  fi
 		  ;;
 		esac
@@ -781,28 +783,28 @@ process_dbs() {
 	  if (( $CONFIG_dryrun )); then
 		case "${CONFIG_mysql_dump_compression}" in
 		'gzip')
-		  echo "dry-running: mysqldump ${authentication} ${opt[@]} $@ | gzip_compression > ${cfname}"
+		  echo "dry-running: ${CONFIG_mysql_dump} ${authentication} ${opt[@]} $@ | gzip_compression > ${cfname}"
 		  ;;
 		'bzip2')
-		  echo "dry-running: mysqldump ${authentication} ${opt[@]} $@ | bzip2_compression > ${cfname}"
+		  echo "dry-running: ${CONFIG_mysql_dump} ${authentication} ${opt[@]} $@ | bzip2_compression > ${cfname}"
 		  ;;
 		*)
-		  echo "dry-running: mysqldump ${authentication} ${opt[@]} $@ > ${cfname}"
+		  echo "dry-running: ${CONFIG_mysql_dump} ${authentication} ${opt[@]} $@ > ${cfname}"
 		  ;;
 		esac
 		return 0;
 	  else
 		case "${CONFIG_mysql_dump_compression}" in
 		'gzip')
-		  mysqldump ${authentication} "${opt[@]}" "$@" | gzip_compression > "${cfname}"
+		  ${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@" | gzip_compression > "${cfname}"
 		  ret=$?
 		  ;;
 		'bzip2')
-		  mysqldump ${authentication} "${opt[@]}" "$@" | bzip2_compression > "${cfname}"
+		  ${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@" | bzip2_compression > "${cfname}"
 		  ret=$?
 		  ;;
 		*)
-		  mysqldump ${authentication} "${opt[@]}" "$@" > "${cfname}"
+		  ${CONFIG_mysql_dump} ${authentication} "${opt[@]}" "$@" > "${cfname}"
 		  ret=$?
 		  ;;
 		esac
@@ -1073,13 +1075,13 @@ check_dependencies () {
 #
 parse_databases() {
   # bash 4.x version
-  #mapfile -t alldbnames < <(mysql ${authentication} --batch --skip-column-names -e "show databases")
+  #mapfile -t alldbnames < <(${CONFIG_mysql} ${authentication} --batch --skip-column-names -e "show databases")
   alldbnames=()
 
   printf "# Parsing databases ... "
   # bash 3.0
   local i;i=0;
-  while read -r; do alldbnames[i++]="$REPLY"; done < <(mysql ${authentication} "${mysql_opt[@]}" --batch --skip-column-names -e "show databases")
+  while read -r; do alldbnames[i++]="$REPLY"; done < <(${CONFIG_mysql} ${authentication} "${mysql_opt[@]}" --batch --skip-column-names -e "show databases")
   unset i
 
   # mkfifo foo || exit; trap 'rm -f foo' EXIT
