@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "automysqlbackup"
+version = "4.0.0"
+description = "Automated MySQL/MariaDB backup tool with daily/weekly/monthly rotation, differential backups, and encryption"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+authors = [
+    {name = "Richard Hering", email = "mail@richardhering.de"},
+]
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Archiving :: Backup",
+    "Topic :: Database",
+]
+
+[project.scripts]
+automysqlbackup = "automysqlbackup.cli:main"
+
+[tool.setuptools]
+packages = ["automysqlbackup"]
+
+[tool.setuptools.package-dir]
+automysqlbackup = "src"
+
+[tool.setuptools.package-data]
+"automysqlbackup" = ["py.typed"]
+
+[tool.unittest]
+start-dir = "tests"
+top-level-dir = "."
+
+[project.urls]
+Homepage = "https://github.com/internethering/AutoMySQLBackup"
+Issues = "https://github.com/internethering/AutoMySQLBackup/issues"

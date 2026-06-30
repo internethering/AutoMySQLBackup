@@ -1,0 +1,22 @@
+# Build output
+dist/
+build/
+*.egg-info/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Test / coverage
+.coverage
+htmlcov/
+
+# Claude
+.claude

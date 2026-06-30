@@ -1,207 +1,179 @@
-AutomysqlBackup
--------------------------
-.. INDEX
--------------------------
-Disclaimer
-Install
-Usage
-Configuration Options
-Encryption
-Backup rotation
-Restoring
+# AutoMySQLBackup
 
+Automated MySQL/MariaDB backup tool with daily, weekly, and monthly rotation,
+differential backups, optional compression and encryption, and email notification.
 
+Originally a bash script (v1.0–3.0, 2002–2011). Rewritten in Python for v4.0.
 
-.. DISCLAIMER
--------------------------
-I take no resposibility for any data loss or corruption when using this script.
-This script will not help in the event of a hard drive crash. If a copy of the
-backup has not been stored offline or on another PC. You should copy your backups
-offline regularly for best protection.
+## Requirements
 
-Happy backing up...
+- Python 3.11+
+- PyYAML (`dev-python/pyyaml` or `pip install pyyaml`)
+- `mysqldump` / `mysql` / `mysqlshow` (or MariaDB equivalents)
+- Optional: `pigz`, `pbzip2` for multicore compression
+- Optional: `openssl` for encryption
+- Optional: `mail` / `mutt` for email notification
+- Optional: `patch` for differential backup recovery
 
+## Installation
 
+```sh
+# copy the package
+cp -r automysqlbackup /usr/lib/python3/dist-packages/
 
-.. INSTALL
--------------------------
-Extract the package into a directory. If you are reading this you have probably done
-this already.
+# install the entry point
+install -m 755 automysqlbackup/__main__.py /usr/local/bin/automysqlbackup
 
-To install the Automysqlbackup the easy way.
-1. Run the install.sh script.
-2. Edit the /etc/automysqlbackup/myserver.conf file to customise your settings.
-3. See usage section.
+# create the config directory and copy the template
+install -d /etc/automysqlbackup
+cp automysqlbackup.yaml /etc/automysqlbackup/automysqlbackup.yaml
+```
 
-To install it manually (the hard way).
-1. Create the /etc/automysqlbackup directory.
-2. Copy in the automysqlbackup.conf file.
-3. Copy the automysqlbackup file to /usr/local/bin and make executable.
-4. cp /etc/automysqlbackup/automysqlbackup.conf /etc/automysqlbackup/myserver.conf
-5. Edit the /etc/automysqlbackup/myserver.conf file to customise your settings.
-6. See usage section.
+Edit `/etc/automysqlbackup/automysqlbackup.yaml` to set your credentials and options.
 
+Alternatively, run directly from the source tree:
 
+```sh
+python3 -m automysqlbackup [options]
+```
 
-.. USAGE
--------------------------
+## Configuration
 
-Automysqlbackup can be run a number of ways, you can choose which is best for you.
+All settings live in `/etc/automysqlbackup/automysqlbackup.yaml`. Every key is
+optional — unset keys fall back to the built-in defaults. A fully annotated
+template is included as `automysqlbackup.yaml` in this repository.
 
-1. Create a script as below called runmysqlbackup using the lines below:
+### Minimal example
 
-#~~~~ Copy From Below Here ~~~~
+```yaml
+mysql:
+  username: backupuser
+  password: s3cr3t
+  host: db.example.com
+
+backup:
+  dir: /var/backup/db
+
+databases:
+  exclude:
+    - information_schema
+    - performance_schema
+```
+
+### Key sections
+
+| Section        | What it controls                                                          |
+|----------------|---------------------------------------------------------------------------|
+| `binaries`     | Paths to `mysql`, `mysqldump`, `mysqlshow` (or MariaDB equivalents)      |
+| `mysql`        | Connection: host, port, credentials, SSL, MySQL 8 mode                    |
+| `backup`       | Backup directory, local files to archive                                  |
+| `schedule`     | Day-of-month for monthly (`do_monthly`), ISO weekday for weekly (`do_weekly`) |
+| `rotation`     | Maximum age in days before a backup file is deleted                       |
+| `databases`    | Include/exclude lists; separate monthly database list                     |
+| `tables`       | Per-table exclusions, supports `db.prefix*` wildcards                     |
+| `dump`         | Single-transaction, master-data, separate dirs, full schema, differential |
+| `compression`  | `gzip` or `bzip2`; multicore via `pigz`/`pbzip2`                         |
+| `latest`       | Keep a hardlinked copy in `latest/` at zero extra disk cost               |
+| `encryption`   | openssl AES-256-CBC post-compression encryption                           |
+| `notification` | `stdout`, `log`, `quiet`, or `files` mode; email address                  |
+| `hooks`        | Shell commands to run before/after the backup                             |
+| `runtime`      | `dryrun` and `debug` flags                                                |
+
+Pass an additional config file with `-c` to layer settings on top of the global
+config — useful for backing up multiple hosts from one machine.
+
+## Usage
+
+```
+automysqlbackup [options]
+
+  -c FILE   Optional config file (layered on top of global config)
+  -b        Run backup (default)
+  -l        Interactive differential backup manager
+  -n        Dry run — show what would be done without making changes
+  -v        Verbose output
+  -d        Debug output
+```
+
+The tool is safe to run multiple times on the same day: if a backup for the
+current period already exists it is skipped.
+
+### Cron
+
+```sh
+# /etc/cron.daily/automysqlbackup
 #!/bin/sh
+automysqlbackup
+find /var/backup/db -type f -exec chmod 400 {} \;
+find /var/backup/db -type d -exec chmod 700 {} \;
+```
 
-/usr/local/bin/automysqlbackup /etc/automysqlbackup/myserver.conf
+## Backup structure
 
-chown root.root /var/backup/db* -R
-find /var/backup/db* -type f -exec chmod 400 {} \;
-find /var/backup/db* -type d -exec chmod 700 {} \;
+```
+/var/backup/db/
+  daily/
+    mydb/
+      daily_mydb_2024-03-15_00h00m_Friday_a3f9c21b.sql.gz
+  weekly/
+    mydb/
+      weekly_mydb_2024-03-15_00h00m_11_d8e1b447.sql.gz
+  monthly/
+    mydb/
+      monthly_mydb_2024-03-01_00h00m_March_7c2a9f83.sql.gz
+  latest/          # hardlinks to today's files (zero extra disk space)
+  fullschema/      # full schema dump (all databases, no data)
+  status/          # mysqlshow --status output
+  tmp/
+```
 
-#~~~~~ Copy To Above Here ~~~~
+## Differential backups
 
-2. Save it to a suitable location or copy it to your /etc/cron.daily folder. 
+Enable with `dump: differential: true`. A full master backup is created on the
+configured weekly day; on all other days a compressed unified diff is stored
+instead. This drastically reduces daily backup size for large, slowly-changing
+databases.
 
-3. Make it executable, i.e. chmod +x /etc/cron.daily/runmysqlbackup.
+Recovery is interactive:
 
+```sh
+automysqlbackup -l
+```
 
-The backup can be run from the command line simply by running the following command.
+Or programmatically via `DiffRecovery.apply(master, diff)` which reconstructs
+the full SQL file using `patch(1)`.
 
-  automysqlbackup /etc/automysqlbackup/myserver.conf
+When differential mode is active, `rotation.daily` is automatically raised to a
+minimum of 21 days to ensure master files outlive their dependents.
 
-If you don't supply an argument for automysqlbackup, the default configuration
-in the program automysqlbackup will be used unless a global file
+## Restoring a full backup
 
-  CONFIG_configfile="/etc/automysqlbackup/automysqlbackup.conf"
+```sh
+# decompress
+gunzip backup.sql.gz          # or: bunzip2 backup.sql.bz2
 
-exists.
+# decrypt (if encryption was used)
+openssl enc -aes-256-cbc -d \
+  -in backup.sql.gz.enc \
+  -out backup.sql.gz \
+  -pass pass:YOUR_PASSWORD
 
-You can just copy the supplied automysqlbackup.conf as many times as you want
-and use for separate configurations, i.e. for example different mysql servers.
+# restore
+mysql --user=root --host=dbserver mydb < backup.sql
+```
 
-!!! NEW !!!
-----------
-As of version 3.0 we have added differential backups using the program diff. In an
-effort to make the reconstruction of the full archives more user friendly, we
-added new functionality to the script. Therefore, while preserving the old syntax,
-we created options for the script, so that the new functions can be accessed.
+## Security
 
-Usage automysqlbackup options -cblh
--c CONFIG_FILE  Specify optional config file.
--b      Use backup method.
--l      List manifest entries.
--h      Show this help.
+Credentials are never passed on the command line. A temporary `my.cnf` file
+(`chmod 0600`) is created for each backup run and removed immediately after.
+MySQL's `--defaults-extra-file` mechanism is used to pass it to all subprocesses.
 
-If you use these options, you have to specify everything according to them and can't
-mix the old syntax with the new one. Example:
+## Running tests
 
-before (still valid!):
+```sh
+python3 -m unittest discover -s tests -t . -v
+```
 
-  >> automysqlbackup "myconfig.conf"
+## License
 
-now:
-
-  >> automysqlbackup -c "myconfig.conf" -b
-
-which is equivalent to
-
-  >> automysqlbackup -bc "myconfig.conf"
-
-or in English: The order of the options doesn't matter, however those options expecting
-arguments, have to be placed right before the argument (as seen above).
-
-The option '-l' (List manifest entries) finds all Manifest files in your configuration
-directory (you need to specify your optional config file - otherwise a fallback will be
-used: global config file -> program internal default options). It then filters from which
-databases these are and presents you with a list (you can select more than one!) of them.
-Once you have chosen, you will be given a list of Manifest files, from which you choose
-again and after that from which you choose differential files. When you have completed
-all your selections, a list of selected differential files will be shown. You may then
-choose what you want to be done with/to those files. At the moment the options are:
-- create full backup out of differential one
-- remove the differential backup and its Manifest entry.
-
-
-.. CONFIGURATION OPTIONS
--------------------------
-
-!! "automysqlbackup" program contains a default configuration that should not be changed:
-
-The global config file which overwrites the default configuration is located here
-"/etc/automysqlbackup/automysqlbackup.conf" by default.
-
-Please take a look at the supplied "automysqlbackup.conf" for information about the configuration options.
-
-Default configuration
-CONFIG_configfile="/etc/automysqlbackup/automysqlbackup.conf"
-CONFIG_backup_dir='/var/backup/db'
-CONFIG_do_monthly="01"
-CONFIG_do_weekly="5"
-CONFIG_rotation_daily=6
-CONFIG_rotation_weekly=35
-CONFIG_rotation_monthly=150
-CONFIG_mysql_dump_usessl='yes'
-CONFIG_mysql_dump_username='root'
-CONFIG_mysql_dump_password=''
-CONFIG_mysql_dump_host='localhost'
-CONFIG_mysql_dump_socket=''
-CONFIG_mysql_dump_create_database='no'
-CONFIG_mysql_dump_use_separate_dirs='yes'
-CONFIG_mysql_dump_compression='gzip'
-CONFIG_mysql_dump_commcomp='no'
-CONFIG_mysql_dump_latest='no'
-CONFIG_mysql_dump_max_allowed_packet=''
-CONFIG_db_names=()
-CONFIG_db_month_names=()
-CONFIG_db_exclude=( 'information_schema' )
-CONFIG_mailcontent='log'
-CONFIG_mail_maxattsize=4000
-CONFIG_mail_address='root'
-CONFIG_encrypt='no'
-CONFIG_encrypt_password='password0123'
-
-!! automysqlbackup (the shell program) accepts one parameter, the filename of a configuration file. The entries in there will supersede all others.
-
-Please take a look at the supplied "automysqlbackup.conf" for information about the configuration options.
-
-
-
-.. ENCRYPTION
--------------------------
-
-To decrypt run (replace bz2 with gz if using gzip):
-
-openssl enc -aes-256-cbc -d -in encrypted_file_name(ex: *.enc.bz2) -out outputfilename.bz2 -pass pass:PASSWORD-USED-TO-ENCRYPT
-
-
-
-.. BACKUP ROTATION
--------------------------
-
-Daily Backups are rotated weekly.
-Weekly Backups are run on fridays, unless otherwise specified via CONFIG_do_weekly.
-Weekly Backups are rotated on a 5 week cycle, unless otherwise specified via CONFIG_rotation_weekly.
-Monthly Backups are run on the 1st of the month, unless otherwise specified via CONFIG_do_monthly.
-Monthly Backups are rotated on a 5 month cycle, unless otherwise specified via CONFIG_rotation_monthly.
-
-Suggestion: It may be a good idea to copy monthly backups offline or to another server.
-
-
-
-.. RESTORING
--------------------------
-
-Firstly you will need to uncompress the backup file and decrypt it if encryption was used (see encryption section).
-
-eg.
-gunzip file.gz (or bunzip2 file.bz2)
-
-Next you will need to use the mysql client to restore the DB from the sql file.
-
-eg.
-  mysql --user=username --pass=password --host=dbserver database < /path/file.sql
-or
-  mysql --user=username --pass=password --host=dbserver -e "source /path/file.sql" database
-
-NOTE: Make sure you use "<" and not ">" in the above command because you are piping the file.sql to mysql and not the other way around.
+GNU General Public License v3 or later. See [LICENSE](LICENSE).

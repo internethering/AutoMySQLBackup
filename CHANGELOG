@@ -2,6 +2,24 @@
 # Change Log
 #=====================================================================
 #
+# version 4.0 - (2026-06-19)
+#     - Complete rewrite in Python 3 (single installable package, one file per class).
+#     - Configuration migrated from bash CONFIG_* variables to YAML
+#       (/etc/automysqlbackup/automysqlbackup.yaml); annotated template included.
+#     - Password is never passed on the command line: credentials are written to a
+#       chmod 0600 temporary file and passed via --defaults-extra-file.
+#     - Differential backup unique-ID extraction fixed (bash ${uid:-8:8} bug replaced
+#       by tempfile.mkstemp suffix).
+#     - backup_local_files inverted-condition bug fixed.
+#     - All-databases idempotency check logic fixed.
+#     - Backup directory path in manifest manager was hardcoded to /var/backup/db/;
+#       now always uses the configured backup_dir.
+#     - latest/ directory uses hardlinks (zero extra disk usage) instead of copies.
+#     - Added MariaDB binary alternatives (mariadb, mariadb-dump, mariadb-show).
+#     - Added MySQL 8 SSL flag support (--ssl-mode=PREFERRED vs legacy --ssl).
+#     - Added unit test suite (193 tests) covering all major classes.
+#     - PyYAML >= 6.0 added as the only new runtime dependency.
+#
 # version 3.0_rc4 - (2011-11-24)
 #     - Removing mkfifo commands, thereby improving portability.
 #     - Fixing not working table exclude feature for wildcards.

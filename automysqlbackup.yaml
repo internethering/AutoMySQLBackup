@@ -1,0 +1,138 @@
+# AutoMySQLBackup configuration
+# Copy to /etc/automysqlbackup/automysqlbackup.yaml
+#
+# All keys are optional — omitted keys fall back to the built-in defaults.
+# Sections can be omitted entirely if none of their keys need changing.
+
+# Set UNIX permission mask for backup files and directories.
+# 0077 gives rwx------ for directories and rw------- for files.
+# umask: "0077"
+
+binaries:
+  mysql:     /usr/bin/mysql
+  mysqldump: /usr/bin/mysqldump
+  mysqlshow: /usr/bin/mysqlshow
+  # MariaDB alternatives:
+  # mysql:     /usr/bin/mariadb
+  # mysqldump: /usr/bin/mariadb-dump
+  # mysqlshow: /usr/bin/mariadb-show
+
+mysql:
+  username: root
+  password: ""
+  host: localhost
+  # Friendly hostname shown in notification emails (falls back to host if unset)
+  host_friendly: ""
+  port: 3306
+  # Unix socket path — leave empty to use TCP
+  socket: ""
+  ssl: true
+  # Set to true for MySQL 8+ (uses --ssl-mode=PREFERRED instead of the older --ssl flag)
+  mysql8: false
+  # Use MySQL config-editor stored credentials instead of username/password
+  encrypted_login: false
+  login_path: local
+
+backup:
+  dir: /var/backup/db
+  # Extra files to include in a weekly tar archive alongside the SQL dumps.
+  # Example: [ /etc/mysql/my.cnf, /etc/mysql/conf.d ]
+  local_files: []
+
+schedule:
+  # Day of the month to run monthly backups (1–31).
+  # If the configured day exceeds the last day of the month, the last day is used.
+  # Set to 0 to disable monthly backups entirely.
+  do_monthly: 1
+  # ISO weekday for weekly backups (1=Mon … 7=Sun). Set to 0 to disable.
+  do_weekly: 5
+
+rotation:
+  # Maximum backup age in days before the file is deleted.
+  daily: 6
+  weekly: 35
+  monthly: 150
+
+databases:
+  # Specific databases to back up daily and weekly.
+  # Empty list (default) backs up all databases discovered on the server.
+  include: []
+  # Databases included in monthly backups. Empty = same as include.
+  monthly: []
+  # Databases to always exclude, regardless of include.
+  exclude:
+    - information_schema
+
+tables:
+  # Tables to exclude from dumps, in db.table form.
+  # Wildcards are supported: mydb.cache_* excludes all tables starting with "cache_".
+  exclude: []
+
+dump:
+  # Compress the MySQL client/server connection (not the backup file itself)
+  commcomp: false
+  # Include CREATE DATABASE statement in each dump file
+  create_database: false
+  # Create one subdirectory and file per database (recommended)
+  use_separate_dirs: true
+  # Maximum packet size for client/server communication, e.g. "512M"
+  max_allowed_packet: ""
+  # Dump InnoDB tables with a consistent snapshot (START TRANSACTION).
+  # Avoids locking but only guarantees consistency for InnoDB tables.
+  single_transaction: false
+  # Write binary log coordinates into the dump for replication setup.
+  # 1 = active CHANGE MASTER TO statement; 2 = written as a comment; null = disabled
+  master_data: null
+  # Dump the full schema (all databases, stored routines, no data) to fullschema/
+  full_schema: true
+  # Dump mysqlshow --status output to status/
+  dbstatus: true
+  # Create differential backups between weekly masters using unified diff.
+  # Minimum rotation_daily is raised to 21 days automatically when enabled
+  # to ensure master files outlive their dependents.
+  differential: false
+
+compression:
+  # Compression algorithm applied to backup files: gzip, bzip2, or "" (none)
+  algorithm: gzip
+  # Use parallel compressors (pigz for gzip, pbzip2 for bzip2) when available
+  multicore: true
+  # Number of compression threads (0 = let the tool auto-detect)
+  threads: 2
+
+latest:
+  # Keep a hardlinked copy of each backup in latest/ (zero extra disk cost)
+  enabled: false
+  # Remove date/time stamps from filenames in latest/ after each run
+  clean_filenames: false
+
+encryption:
+  # Encrypt backup files with openssl AES-256-CBC after compression
+  enabled: false
+  password: ""
+
+notification:
+  # What to send after each run:
+  #   stdout — print the log to the console (default; good for cron)
+  #   log    — email the full log to address
+  #   quiet  — email only when errors occurred
+  #   files  — email the log and attach the backup files
+  content: stdout
+  # Maximum email attachment size in kilobytes (approximate; 4000 ≈ 5 MB email)
+  max_attachment_size: 4000
+  # Pack attachments with tar and split at max_attachment_size boundaries
+  split_and_tar: true
+  # Use uuencode instead of mutt for attachments (not supported by all mail clients)
+  uuencoded: false
+  address: root
+
+hooks:
+  # Shell command executed before the backup run starts
+  prebackup: ""
+  # Shell command executed after the backup run completes
+  postbackup: ""
+
+runtime:
+  # Show what would be done without creating or deleting any files
+  dryrun: false
+  debug: false
