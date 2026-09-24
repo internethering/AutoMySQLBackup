@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.resources
 import logging
 import shutil
 import subprocess
@@ -25,6 +26,12 @@ LOG = logging.getLogger(__name__)
 # Parent logger of every module in this package. Handlers attached here see
 # records from orchestrator, database, etc.; handlers on LOG would not.
 PKG_LOG = logging.getLogger(__name__.rpartition(".")[0] or __name__)
+
+
+def config_template() -> str:
+    """Return the annotated configuration template shipped inside the package."""
+    return (importlib.resources.files(PKG_LOG.name)
+            .joinpath("automysqlbackup.yaml").read_text(encoding="utf-8"))
 
 
 class _LogCapture(logging.Handler):
@@ -53,6 +60,10 @@ class _LogCapture(logging.Handler):
 class AutoMySQLBackup:
     def main(self, argv: Optional[list[str]] = None) -> int:
         args = self._parse_args(argv)
+        if args.print_config:
+            # Needs no configuration, so it runs before Config.load().
+            sys.stdout.write(config_template())
+            return 0
         self._configure_logging(args)
 
         try:
@@ -87,6 +98,9 @@ class AutoMySQLBackup:
                        help="Show what would be done without making changes")
         p.add_argument("-v", "--verbose", action="store_true")
         p.add_argument("-d", "--debug", action="store_true")
+        p.add_argument("--print-config", action="store_true",
+                       help="Print the annotated configuration template and exit")
+        p.add_argument("-V", "--version", action="version", version=f"%(prog)s {VERSION}")
         return p.parse_args(argv)
 
     @staticmethod

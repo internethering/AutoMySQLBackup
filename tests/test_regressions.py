@@ -22,7 +22,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from automysqlbackup.auth import AuthContext, _quote_option
-from automysqlbackup.cli import PKG_LOG, AutoMySQLBackup, _LogCapture
+from automysqlbackup.cli import PKG_LOG, AutoMySQLBackup, _LogCapture, config_template
 from automysqlbackup.compression import CompressionHandler
 from automysqlbackup.config import Config
 from automysqlbackup.database import DatabaseOps
@@ -558,3 +558,21 @@ class TestNotifier(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── Packaging: shipped configuration template ───────────────────────────────
+
+class TestConfigTemplate(unittest.TestCase):
+    def test_print_config_outputs_template(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            rc = AutoMySQLBackup().main(["--print-config"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.getvalue().startswith("# AutoMySQLBackup configuration"))
+
+    def test_template_is_a_valid_configuration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "c.yaml"
+            p.write_text(config_template())
+            with patch.object(Config, "_GLOBAL_CONFIG", Path(tmp) / "none.yaml"):
+                cfg = Config.load(p)
+        self.assertEqual(cfg.backup_dir, Path("/var/backup/db"))

@@ -18,3 +18,22 @@ jobs:
       - run: pip install pyyaml pyflakes
       - run: python -m pyflakes src tests
       - run: python -m unittest discover -s tests -t . -v
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install build
+      - run: python -m build
+      # Install the wheel outside the source tree and check the shipped template.
+      - run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install dist/*.whl
+          cd /tmp && /tmp/venv/bin/automysqlbackup --print-config | grep -q "AutoMySQLBackup configuration"
+      # The sdist must contain everything needed to run the test suite.
+      - run: |
+          mkdir /tmp/sdist && tar xzf dist/*.tar.gz -C /tmp/sdist --strip-components=1
+          cd /tmp/sdist && pip install pyyaml && python -m unittest discover -s tests -t .

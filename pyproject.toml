@@ -42,7 +42,7 @@ automysqlbackup = "src"
 version = {attr = "automysqlbackup._version.__version__"}
 
 [tool.setuptools.package-data]
-"automysqlbackup" = ["py.typed"]
+"automysqlbackup" = ["py.typed", "automysqlbackup.yaml"]
 
 [tool.unittest]
 start-dir = "tests"

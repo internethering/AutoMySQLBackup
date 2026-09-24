@@ -1,0 +1,4 @@
+# Files for the source distribution (sdist) beyond the package itself.
+include CHANGELOG LICENSE README.md requirements.txt
+include src/automysqlbackup.yaml
+recursive-include tests *.py

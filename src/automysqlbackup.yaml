@@ -1,5 +1,5 @@
 # AutoMySQLBackup configuration
-# Copy to /etc/automysqlbackup/automysqlbackup.yaml
+# Create with: automysqlbackup --print-config > /etc/automysqlbackup/automysqlbackup.yaml
 #
 # All keys are optional — omitted keys fall back to the built-in defaults.
 # Sections can be omitted entirely if none of their keys need changing.

@@ -47,7 +47,9 @@
 #       deleting diffs requires confirmation.
 #     - Table wildcards escape "_"/"%" and quotes in the LIKE query.
 #     - performance_schema excluded by default; backup_local_files archives rotated.
-#     - Packaging: `pip install .` documented, version defined once (_version.py).
+#     - Packaging: built with setuptools (`python -m build`); config template shipped
+#       as package data (`automysqlbackup --print-config`); complete sdist via
+#       MANIFEST.in; version defined once (_version.py); `-V/--version` option.
 #
 # version 3.0_rc4 - (2011-11-24)
 #     - Removing mkfifo commands, thereby improving portability.

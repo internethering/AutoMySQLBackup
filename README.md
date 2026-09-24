@@ -18,13 +18,27 @@ Originally a bash script (v1.0–3.0, 2002–2011). Rewritten in Python for v4.0
 
 ## Installation
 
-```sh
-# install the package and the `automysqlbackup` command
-pip install .
+AutoMySQLBackup is built with setuptools. Build the packages once:
 
-# create the config directory and copy the template
-install -d /etc/automysqlbackup
-cp automysqlbackup.yaml /etc/automysqlbackup/automysqlbackup.yaml
+```sh
+pip install build
+python3 -m build            # creates dist/automysqlbackup-<version>.tar.gz and .whl
+```
+
+Then install the wheel on each server — into its own virtual environment
+(recommended), with pipx, or directly from the source tree with `pip install .`:
+
+```sh
+python3 -m venv /opt/automysqlbackup
+/opt/automysqlbackup/bin/pip install dist/automysqlbackup-*.whl
+ln -s /opt/automysqlbackup/bin/automysqlbackup /usr/local/bin/automysqlbackup
+```
+
+Create the configuration from the template shipped with the package:
+
+```sh
+install -d -m 700 /etc/automysqlbackup
+automysqlbackup --print-config > /etc/automysqlbackup/automysqlbackup.yaml
 chmod 600 /etc/automysqlbackup/automysqlbackup.yaml
 ```
 
@@ -38,7 +52,8 @@ After installation the tool can also be started as `python3 -m automysqlbackup`.
 
 All settings live in `/etc/automysqlbackup/automysqlbackup.yaml`. Every key is
 optional — unset keys fall back to the built-in defaults. A fully annotated
-template is included as `automysqlbackup.yaml` in this repository.
+template is printed by `automysqlbackup --print-config` (source:
+`src/automysqlbackup.yaml`).
 
 ### Minimal example
 
@@ -90,6 +105,8 @@ automysqlbackup [options]
   -n        Dry run — show what would be done without making changes
   -v        Verbose output
   -d        Debug output
+  --print-config  Print the annotated configuration template
+  -V        Show the version
 ```
 
 Weekly and monthly backups are created at most once per day: if a finished
