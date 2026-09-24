@@ -19,6 +19,7 @@ binaries:
 
 mysql:
   username: root
+  # Always quote passwords — unquoted values like 012345 are read as numbers.
   password: ""
   host: localhost
   # Friendly hostname shown in notification emails (falls back to host if unset)
@@ -62,6 +63,7 @@ databases:
   # Databases to always exclude, regardless of include.
   exclude:
     - information_schema
+    - performance_schema
 
 tables:
   # Tables to exclude from dumps, in db.table form.
@@ -107,13 +109,16 @@ latest:
   clean_filenames: false
 
 encryption:
-  # Encrypt backup files with openssl AES-256-CBC after compression
+  # Encrypt backup files with openssl AES-256-CBC (PBKDF2, 200000 iterations)
+  # after compression. Decrypt with:
+  #   openssl enc -d -aes-256-cbc -salt -pbkdf2 -iter 200000 -in FILE.enc -out FILE
+  # Differential backups are disabled while encryption is enabled.
   enabled: false
   password: ""
 
 notification:
   # What to send after each run:
-  #   stdout — print the log to the console (default; good for cron)
+  #   stdout — log to the console (-v for info messages), error summary at the end (default; good for cron)
   #   log    — email the full log to address
   #   quiet  — email only when errors occurred
   #   files  — email the log and attach the backup files
@@ -121,8 +126,9 @@ notification:
   # Maximum email attachment size in kilobytes (approximate; 4000 ≈ 5 MB email)
   max_attachment_size: 4000
   # Pack attachments with tar and split at max_attachment_size boundaries
+  # (one mail per part). When false, files larger than the limit are not attached.
   split_and_tar: true
-  # Use uuencode instead of mutt for attachments (not supported by all mail clients)
+  # Inline uuencoded attachments via mail instead of mutt (not supported by all mail clients)
   uuencoded: false
   address: root
 

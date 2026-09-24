@@ -11,6 +11,22 @@ from typing import Any, Optional
 LOG = logging.getLogger(__name__)
 
 
+def _password(raw: Any, key: str) -> str:
+    """Convert a YAML password value to str, warning about lossy YAML typing.
+
+    Unquoted values such as 012345 (read as octal 5349), 1.50 or yes are
+    converted by YAML before we see them, so the original text is lost.
+    """
+    if raw is None:
+        return ""
+    if not isinstance(raw, str):
+        LOG.warning(
+            "%s was parsed by YAML as %s (%r) — the value may not be what you "
+            "typed. Put the password in quotes.", key, type(raw).__name__, raw,
+        )
+    return str(raw)
+
+
 @dataclasses.dataclass
 class Config:
     """All runtime configuration; loaded from a YAML config file with hardcoded defaults."""
@@ -65,7 +81,9 @@ class Config:
     # Database / table selection
     db_names: list[str] = dataclasses.field(default_factory=list)
     db_month_names: list[str] = dataclasses.field(default_factory=list)
-    db_exclude: list[str] = dataclasses.field(default_factory=lambda: ["information_schema"])
+    db_exclude: list[str] = dataclasses.field(
+        default_factory=lambda: ["information_schema", "performance_schema"]
+    )
     table_exclude: list[str] = dataclasses.field(default_factory=list)
 
     # Local file backup
@@ -100,6 +118,9 @@ class Config:
         init=False, repr=False, compare=False,
     )
 
+    _COMPRESSIONS = ("gzip", "bzip2", "")
+    _MAILCONTENTS = ("stdout", "log", "quiet", "files")
+
     # ── Class methods ─────────────────────────────────────────────────────────
 
     @classmethod
@@ -110,7 +131,36 @@ class Config:
             if path and Path(path).is_file():
                 cfg._apply_yaml(Path(path))
                 LOG.debug("Loaded config from %s", path)
+        cfg.validate()
         return cfg
+
+    def validate(self) -> None:
+        """Raise ValueError listing every invalid setting.
+
+        Typos must fail loudly: an unknown compression algorithm would otherwise
+        produce silently uncompressed backups, an unknown notification mode
+        would silently send nothing.
+        """
+        problems: list[str] = []
+        if self.compression not in self._COMPRESSIONS:
+            problems.append(f"compression.algorithm must be gzip, bzip2 or \"\" "
+                            f"(got {self.compression!r})")
+        if self.mailcontent not in self._MAILCONTENTS:
+            problems.append(f"notification.content must be one of "
+                            f"{', '.join(self._MAILCONTENTS)} (got {self.mailcontent!r})")
+        for name, lo, hi in [("do_monthly", 0, 31), ("do_weekly", 0, 7)]:
+            val = getattr(self, name)
+            if not isinstance(val, int) or isinstance(val, bool) or not lo <= val <= hi:
+                problems.append(f"schedule.{name} must be an integer {lo}–{hi} (got {val!r})")
+        for name in ("rotation_daily", "rotation_weekly", "rotation_monthly",
+                     "port", "multicore_threads", "mail_maxattsize"):
+            val = getattr(self, name)
+            if not isinstance(val, int) or isinstance(val, bool) or val < 0:
+                problems.append(f"{name} must be a non-negative integer (got {val!r})")
+        if self.encrypt and not self.encrypt_password:
+            problems.append("encryption.enabled is true but encryption.password is empty")
+        if problems:
+            raise ValueError("Invalid configuration:\n  " + "\n  ".join(problems))
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
@@ -160,7 +210,7 @@ class Config:
         apply("login_path",      m.get("login_path"))
         # Treat explicit null/empty as an intentional blank password.
         if "password" in m:
-            self.password = str(m["password"]) if m["password"] is not None else ""
+            self.password = _password(m["password"], "mysql.password")
 
         bk = sec("backup")
         if "dir" in bk:
@@ -215,7 +265,7 @@ class Config:
         enc = sec("encryption")
         apply("encrypt", enc.get("enabled"))
         if "password" in enc:
-            self.encrypt_password = str(enc["password"]) if enc["password"] else ""
+            self.encrypt_password = _password(enc["password"], "encryption.password")
 
         notif = sec("notification")
         apply("mailcontent",      notif.get("content"))

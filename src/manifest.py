@@ -17,10 +17,12 @@ LOG = logging.getLogger(__name__)
 # On-disk manifest line format (tab-separated, human-readable labels):
 #   <filename>  md5sum  <hex>  diff_id  <8chars>  rel_id  <8chars|0>  db  <name>
 # rel_id "0" marks a master backup; any other value is the diff_id of its master.
+# IDs come from tempfile.mkstemp, whose alphabet includes "_" — rejecting it
+# silently dropped about one entry in five.
 _MANIFEST_RE = re.compile(
     r"^(?P<fname>[^\t]+)\tmd5sum\t(?P<md5>[^\t]+)\t"
-    r"diff_id\t(?P<did>[A-Za-z0-9]{8})\t"
-    r"rel_id\t(?P<rid>0|[A-Za-z0-9]{8})\t"
+    r"diff_id\t(?P<did>[A-Za-z0-9_]{8})\t"
+    r"rel_id\t(?P<rid>0|[A-Za-z0-9_]{8})\t"
     r"db\t(?P<db>[^\t]*)$"
 )
 
@@ -140,6 +142,18 @@ class Manifest:
     def latest_master(self, db: str) -> Optional[ManifestEntry]:
         masters = [e for e in self.entries if e.db == db and e.is_master]
         return masters[-1] if masters else None
+
+    def master_for(self, diff: ManifestEntry) -> Optional[ManifestEntry]:
+        """Return the master a differential was created against, if still present.
+
+        Must be used instead of latest_master() for recovery: after the next
+        weekly master is taken, older diffs still refer to the previous one.
+        """
+        return next(
+            (e for e in self.entries
+             if e.is_master and e.db == diff.db and e.diff_id == diff.rel_id),
+            None,
+        )
 
     def diffs_for_db(self, db: str) -> list[ManifestEntry]:
         return [e for e in self.entries if e.db == db and not e.is_master]

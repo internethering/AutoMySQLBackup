@@ -13,29 +13,26 @@ Originally a bash script (v1.0–3.0, 2002–2011). Rewritten in Python for v4.0
 - Optional: `pigz`, `pbzip2` for multicore compression
 - Optional: `openssl` for encryption
 - Optional: `mail` / `mutt` for email notification
-- Optional: `patch` for differential backup recovery
+- Optional: `diff` and `patch` for differential backups and their recovery
+- Optional: `uuencode`-capable mail client or `mutt` for mailing backup files
 
 ## Installation
 
 ```sh
-# copy the package
-cp -r automysqlbackup /usr/lib/python3/dist-packages/
-
-# install the entry point
-install -m 755 automysqlbackup/__main__.py /usr/local/bin/automysqlbackup
+# install the package and the `automysqlbackup` command
+pip install .
 
 # create the config directory and copy the template
 install -d /etc/automysqlbackup
 cp automysqlbackup.yaml /etc/automysqlbackup/automysqlbackup.yaml
+chmod 600 /etc/automysqlbackup/automysqlbackup.yaml
 ```
 
 Edit `/etc/automysqlbackup/automysqlbackup.yaml` to set your credentials and options.
+Put passwords in quotes: YAML turns unquoted values such as `012345` into
+numbers (here: octal 5349) before the program ever sees them.
 
-Alternatively, run directly from the source tree:
-
-```sh
-python3 -m automysqlbackup [options]
-```
+After installation the tool can also be started as `python3 -m automysqlbackup`.
 
 ## Configuration
 
@@ -95,8 +92,19 @@ automysqlbackup [options]
   -d        Debug output
 ```
 
-The tool is safe to run multiple times on the same day: if a backup for the
-current period already exists it is skipped.
+Weekly and monthly backups are created at most once per day: if a finished
+backup for the current period already exists it is skipped. Every run creates a
+new daily backup. Dumps are written to a `.part` file first and renamed only on
+success, so a failed or interrupted dump is retried by the next run.
+
+### Exit status
+
+| Code | Meaning                                                  |
+|------|----------------------------------------------------------|
+| 0    | Backup completed without errors                          |
+| 1    | At least one error was logged (e.g. a failed dump)       |
+| 2    | Invalid configuration                                    |
+| 130  | Interrupted                                              |
 
 ### Cron
 
@@ -143,8 +151,13 @@ automysqlbackup -l
 Or programmatically via `DiffRecovery.apply(master, diff)` which reconstructs
 the full SQL file using `patch(1)`.
 
+Diffs are computed with `diff -u` on plain SQL staged in `tmp/` (both the
+master and the current dump are written there temporarily), so make sure that
+directory has room for two uncompressed dumps.
+
 When differential mode is active, `rotation.daily` is automatically raised to a
-minimum of 21 days to ensure master files outlive their dependents.
+minimum of 21 days. In addition, a master is never rotated while any diff in the
+Manifest still refers to it. Differential mode is skipped when encryption is on.
 
 ## Restoring a full backup
 
@@ -152,11 +165,12 @@ minimum of 21 days to ensure master files outlive their dependents.
 # decompress
 gunzip backup.sql.gz          # or: bunzip2 backup.sql.bz2
 
-# decrypt (if encryption was used)
-openssl enc -aes-256-cbc -d \
+# decrypt (if encryption was used); prompts for the password
+openssl enc -d -aes-256-cbc -salt -pbkdf2 -iter 200000 \
   -in backup.sql.gz.enc \
-  -out backup.sql.gz \
-  -pass pass:YOUR_PASSWORD
+  -out backup.sql.gz
+# files encrypted before this change used the legacy key derivation:
+#   openssl enc -d -aes-256-cbc -in backup.sql.gz.enc -out backup.sql.gz
 
 # restore
 mysql --user=root --host=dbserver mydb < backup.sql
@@ -167,12 +181,16 @@ mysql --user=root --host=dbserver mydb < backup.sql
 Credentials are never passed on the command line. A temporary `my.cnf` file
 (`chmod 0600`) is created for each backup run and removed immediately after.
 MySQL's `--defaults-extra-file` mechanism is used to pass it to all subprocesses.
+The encryption password is handed to `openssl` on stdin, never in its argument list.
 
 ## Running tests
 
 ```sh
 python3 -m unittest discover -s tests -t . -v
 ```
+
+The tests run from the source tree without installing the package; some of
+them need `gzip`, `diff`, `patch` and `openssl` on the `PATH`.
 
 ## License
 

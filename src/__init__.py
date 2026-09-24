@@ -1,5 +1,6 @@
 """AutoMySQLBackup — Automated MySQL/MariaDB backup tool."""
 
+from ._version import __version__
 from .auth import AuthContext
 from .cli import AutoMySQLBackup, main
 from .compression import CompressionHandler
@@ -13,7 +14,6 @@ from .notifier import Notifier
 from .orchestrator import BackupOrchestrator
 from .recovery import DiffRecovery
 
-__version__ = "4.0"
 __all__ = [
     "AutoMySQLBackup",
     "AuthContext",
@@ -28,5 +28,6 @@ __all__ = [
     "Manifest",
     "ManifestEntry",
     "Notifier",
+    "__version__",
     "main",
 ]

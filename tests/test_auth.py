@@ -33,7 +33,7 @@ class TestAuthContextTempFile(unittest.TestCase):
         with AuthContext(_cfg(password="hunter2")) as auth:
             content = auth._cnf.read_text()
             self.assertIn("[client]", content)
-            self.assertIn("password=hunter2", content)
+            self.assertIn('password="hunter2"', content)
 
     def test_cnf_file_mode_is_0600(self):
         with AuthContext(_cfg(password="secret")) as auth:

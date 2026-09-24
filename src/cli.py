@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from ._version import __version__ as VERSION
 from .auth import AuthContext
 from .compression import CompressionHandler
 from .config import Config
@@ -21,7 +22,9 @@ from .notifier import Notifier
 from .orchestrator import BackupOrchestrator
 
 LOG = logging.getLogger(__name__)
-VERSION = "4.0"
+# Parent logger of every module in this package. Handlers attached here see
+# records from orchestrator, database, etc.; handlers on LOG would not.
+PKG_LOG = logging.getLogger(__name__.rpartition(".")[0] or __name__)
 
 
 class _LogCapture(logging.Handler):
@@ -52,7 +55,11 @@ class AutoMySQLBackup:
         args = self._parse_args(argv)
         self._configure_logging(args)
 
-        cfg = Config.load(extra=args.config)
+        try:
+            cfg = Config.load(extra=args.config)
+        except (ValueError, RuntimeError, OSError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
         if args.dryrun:
             cfg.dryrun = True
         if args.debug:
@@ -92,6 +99,11 @@ class AutoMySQLBackup:
             format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
+        # The console shows only what -v/-d asked for, but the package logger
+        # passes INFO on so the emailed log is complete without -v.
+        for handler in logging.getLogger().handlers:
+            handler.setLevel(level)
+        PKG_LOG.setLevel(min(level, logging.INFO))
 
     # ── Backup command ────────────────────────────────────────────────────────
 
@@ -104,7 +116,9 @@ class AutoMySQLBackup:
             return 1
 
         capture = _LogCapture()
-        LOG.addHandler(capture)
+        capture.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s: %(message)s", datefmt="%H:%M:%S"))
+        PKG_LOG.addHandler(capture)
         backup_files: list[Path] = []
         exit_code = 0
 
@@ -156,8 +170,17 @@ class AutoMySQLBackup:
             LOG.exception("Unexpected error: %s", exc)
             exit_code = 1
         finally:
-            Notifier(cfg).send(capture.log_text, capture.error_text, backup_files)
+            PKG_LOG.removeHandler(capture)
+            try:
+                Notifier(cfg).send(capture.log_text, capture.error_text, backup_files)
+            except Exception as exc:  # noqa: BLE001
+                # Never let a notification problem mask the backup result.
+                print(f"ERROR: notification failed: {exc}", file=sys.stderr)
 
+        # Any error logged during the run (failed dump, rotation, encryption …)
+        # must reach cron/systemd as a non-zero exit status.
+        if exit_code == 0 and capture.error_text:
+            exit_code = 1
         return exit_code
 
     # ── List / manage manifests command ───────────────────────────────────────
@@ -179,12 +202,16 @@ class AutoMySQLBackup:
             raise RuntimeError(f"Required tools not found: {', '.join(missing)}")
         if cfg.encrypt and not shutil.which("openssl"):
             raise RuntimeError("openssl not found but encryption is enabled")
+        if cfg.differential and not cfg.encrypt and not shutil.which("diff"):
+            raise RuntimeError("diff not found but differential backups are enabled")
         if cfg.mailcontent in ("log", "quiet", "files"):
             if not shutil.which("mail"):
-                LOG.warning("mail command not found; email notifications disabled")
+                LOG.warning("mail command not found; the report will be printed "
+                            "to stdout instead of emailed")
             if cfg.mailcontent == "files" and not cfg.mail_uuencoded:
                 if not shutil.which("mutt"):
-                    LOG.warning("mutt not found; falling back to plain mail")
+                    LOG.warning("mutt not found; falling back to plain mail "
+                                "without attachments")
 
 
 def main() -> None:

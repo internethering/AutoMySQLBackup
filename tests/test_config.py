@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import tempfile
 import unittest
 from pathlib import Path
 
-try:
-    import yaml  # noqa: F401
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
+HAS_YAML = importlib.util.find_spec("yaml") is not None
 
 from automysqlbackup.config import Config
 

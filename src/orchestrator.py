@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import datetime
-import difflib
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -92,7 +92,9 @@ class BackupOrchestrator:
     def _already_done_today(self, glob_pattern: str) -> bool:
         # Idempotency guard: if a matching file already exists for today's date,
         # a previous run completed successfully and we should skip this period.
-        return bool(list(self._cfg.backup_dir.glob(glob_pattern)))
+        # ".part" files are leftovers of interrupted dumps, not finished backups.
+        return any(not f.name.endswith(".part")
+                   for f in self._cfg.backup_dir.glob(glob_pattern))
 
     # ── Post-processing ───────────────────────────────────────────────────────
 
@@ -172,7 +174,10 @@ class BackupOrchestrator:
                 continue
             dest = base / f"{filename_prefix}_{period_label}{ext}{self._comp.suffix}"
             if dump_fn(dest) == 0:  # type: ignore[operator]
-                self._dirs.rotate(base, rotation)
+                # fullschema/ and status/ hold all three periods in one
+                # directory: rotate only this kind, or the daily pass would
+                # delete weekly and monthly files after rotation_daily days.
+                self._dirs.rotate(base, rotation, pattern=f"{filename_prefix}_{kind}_*")
                 self._files.append(self._postprocess(dest))
             else:
                 LOG.error("%s failed (%s)", label, kind)
@@ -201,14 +206,18 @@ class BackupOrchestrator:
             LOG.info("[dryrun] tar -c%svf %s %s",
                      compress_flag, archive, self._cfg.backup_local_files)
             return
+        part = archive.with_name(archive.name + ".part")
         rc = subprocess.run(
             # "--" stops tar from interpreting paths starting with "-" as flags.
-            ["tar", f"-c{compress_flag}vf", str(archive), "--"] + self._cfg.backup_local_files
+            ["tar", f"-c{compress_flag}f", str(part), "--"] + self._cfg.backup_local_files
         ).returncode
         if rc == 0:
+            part.replace(archive)
+            self._dirs.rotate(base, self._cfg.rotation_weekly, pattern="bcf_weekly_*")
             self._files.append(self._postprocess(archive))
         else:
-            LOG.error("Local files backup failed")
+            part.unlink(missing_ok=True)
+            LOG.error("Local files backup failed (tar exit %d)", rc)
 
     # ── Database backup dispatching ────────────────────────────────────────────
 
@@ -230,9 +239,11 @@ class BackupOrchestrator:
         if self._cfg.use_separate_dirs:
             for db in dbs:
                 db_dir = self._cfg.backup_dir / period / db
-                db_dir.mkdir(exist_ok=True)
+                if not self._cfg.dryrun:
+                    db_dir.mkdir(exist_ok=True)
+                # Trailing "*" also matches the ".enc" suffix of encrypted files.
                 if period != "daily" and self._already_done_today(
-                        f"{period}/{db}/{prefix}{db}_{self.date_stamp}_*{midfix}{ext}{suf}"):
+                        f"{period}/{db}/{prefix}{db}_{self.date_stamp}_*{midfix}{ext}{suf}*"):
                     LOG.info("Skipping %s/%s (already done today)", period, db)
                     continue
                 self._dump_one(db_dir, prefix, midfix, ext, suf,
@@ -240,7 +251,7 @@ class BackupOrchestrator:
         else:
             db_dir = self._cfg.backup_dir / period
             if period != "daily" and self._already_done_today(
-                    f"{period}/{prefix}all-databases_{self.date_stamp}_*{midfix}{ext}{suf}"):
+                    f"{period}/{prefix}all-databases_{self.date_stamp}_*{midfix}{ext}{suf}*"):
                 LOG.info("Skipping %s/all-databases (already done today)", period)
                 return
             self._dump_one(db_dir, prefix, midfix, ext, suf,
@@ -294,6 +305,11 @@ class BackupOrchestrator:
             self._do_weekly() and self.date_stamp not in master.filename.name
         )
 
+        if self._cfg.dryrun:
+            LOG.info("[dryrun] would write %s backup of %s to %s",
+                     "master" if need_master else "differential", db_name, directory)
+            return
+
         # Allocate a unique filename via tempfile (fixes the original bash bug where
         # UID extraction used "${uid:-8:8}" — an invalid slice that always returned "").
         # The prefix strips ".sql" so the mkstemp suffix + final extension are not
@@ -318,50 +334,11 @@ class BackupOrchestrator:
             LOG.info("Master backup: %s", out.name)
         else:
             assert master is not None
-            # mkstemp always creates a file; in the differential path the diff gets
-            # its own derived name below, so delete the placeholder first.
+            # mkstemp only reserved the unique name; the diff gets the same stem
+            # (and thus the same 8-char ID) with a .diff extension.
             out.unlink(missing_ok=True)
-
-            try:
-                current_sql = self._db.dump_databases_raw(databases)
-            except RuntimeError as exc:
-                LOG.error("Failed to get current dump for diff: %s", exc)
-                return
-
-            master_proc = self._comp.decompress_stdout(master.filename)
-            master_sql, _ = master_proc.communicate()
-
-            diff_text = "".join(difflib.unified_diff(
-                master_sql.decode(errors="replace").splitlines(keepends=True),
-                current_sql.decode(errors="replace").splitlines(keepends=True),
-                fromfile="master.sql",
-                tofile="current.sql",
-            )).encode()
-
-            # Derive the diff filename from the master allocation by swapping the
-            # extension while preserving the unique 8-char mkstemp ID embedded in
-            # the filename stem.
-            diff_dest = Path(str(out).replace(".sql" + suf, ".diff" + suf))
-
-            if self._cfg.dryrun:
-                LOG.info("[dryrun] would write diff to %s", diff_dest)
-                return
-
-            compress_cmd = self._comp.compress_cmd()
-            if compress_cmd:
-                with diff_dest.open("wb") as fh:
-                    proc = subprocess.Popen(
-                        compress_cmd,
-                        stdin=subprocess.PIPE,
-                        stdout=fh,
-                    )
-                    proc.communicate(diff_text)
-                    rc = proc.returncode or 0
-            else:
-                diff_dest.write_bytes(diff_text)
-                rc = 0
-
-            if rc == 0:
+            diff_dest = out.with_name(out.name[: -len(".sql" + suf)] + ".diff" + suf)
+            if self._write_diff(master.filename, databases, diff_dest) == 0:
                 manifest.add(diff_dest, master.diff_id, db_name)
                 self._dirs.hardlink_to_latest(diff_dest)
                 # Also hardlink the master alongside the diff so latest/ contains
@@ -373,7 +350,61 @@ class BackupOrchestrator:
             else:
                 LOG.error("Failed to write differential backup for %s", db_name)
 
-        self._dirs.rotate(directory, rotation)
+        # A master must outlive every diff that refers to it, otherwise those
+        # diffs become unrestorable before they expire themselves.
+        manifest.parse()
+        referenced = {e.rel_id for e in manifest.entries if not e.is_master}
+        keep = [e.filename for e in manifest.entries
+                if e.is_master and e.diff_id in referenced]
+        self._dirs.rotate(directory, rotation, keep=keep)
+
+    def _write_diff(self, master: Path, databases: list[str], dest: Path) -> int:
+        """Write a compressed unified diff between master and a fresh dump.
+
+        Both inputs are staged as plain SQL in backup_dir/tmp and compared by
+        diff(1), which streams — difflib would need both dumps in memory and
+        is far slower on large files. Returns 0 on success.
+        """
+        tmp_dir = self._cfg.backup_dir / "tmp"
+        tmp_dir.mkdir(exist_ok=True)
+        staged: list[Path] = []
+        for _ in range(2):
+            fd, name = tempfile.mkstemp(dir=tmp_dir, suffix=".sql")
+            os.close(fd)
+            staged.append(Path(name))
+        master_sql, current_sql = staged
+        try:
+            dec = self._comp.decompress_stdout(master)
+            with master_sql.open("wb") as f:
+                shutil.copyfileobj(dec.stdout, f, 1024 * 1024)  # type: ignore[arg-type]
+            dec.stdout.close()  # type: ignore[union-attr]
+            if dec.wait() != 0:
+                LOG.error("Could not decompress master %s", master)
+                return 1
+
+            rc = self._db.dump_databases(databases, current_sql, compress=False)
+            if rc != 0:
+                return rc
+
+            part = dest.with_name(dest.name + ".part")
+            with tempfile.TemporaryFile() as err:
+                proc = subprocess.Popen(
+                    ["diff", "-u", str(master_sql), str(current_sql)],
+                    stdout=subprocess.PIPE, stderr=err,
+                )
+                # diff exits 1 when the files differ, which is the normal case.
+                rc = self._comp.pipe_compress(proc, part, source_ok=(0, 1))
+                err.seek(0)
+                stderr = err.read().decode(errors="replace").strip()
+            if rc != 0:
+                part.unlink(missing_ok=True)
+                LOG.error("diff failed (exit %d): %s", rc, stderr)
+                return rc
+            part.replace(dest)
+            return 0
+        finally:
+            for f in staged:
+                f.unlink(missing_ok=True)
 
     # ── Latest folder filename cleaning ───────────────────────────────────────
 
@@ -384,7 +415,10 @@ class BackupOrchestrator:
             r"January|February|March|April|May|June|July|August|September|"
             r"October|November|December|\d{1,2})"
         )
-        for f in (self._cfg.backup_dir / "latest").iterdir():
+        latest = self._cfg.backup_dir / "latest"
+        if self._cfg.dryrun or not latest.is_dir():
+            return
+        for f in latest.iterdir():
             clean = pat.sub("", f.name)
             if clean != f.name:
                 f.rename(f.parent / clean)

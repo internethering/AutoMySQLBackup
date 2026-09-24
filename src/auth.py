@@ -10,6 +10,18 @@ from typing import Optional
 from .config import Config
 
 
+def _quote_option(value: str) -> str:
+    """Quote a value for a MySQL option file.
+
+    Unquoted, a "#" starts a comment and leading/trailing blanks are stripped,
+    so passwords containing them would be silently truncated. Inside double
+    quotes the client library understands backslash escapes for \\ and \".
+    """
+    escaped = (value.replace("\\", "\\\\").replace('"', '\\"')
+               .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t"))
+    return f'"{escaped}"'
+
+
 class AuthContext:
     """Context manager that writes credentials to a 0600 temp file and passes
     it to MySQL via --defaults-extra-file, keeping the password out of argv.
@@ -30,7 +42,7 @@ class AuthContext:
             # os.fdopen takes ownership of fd and closes it on exit, preventing
             # a descriptor leak from the mkstemp fd.
             with os.fdopen(fd, "w") as f:
-                f.write(f"[client]\npassword={cfg.password}\n")
+                f.write(f"[client]\npassword={_quote_option(cfg.password)}\n")
         return self
 
     def __exit__(self, *_: object) -> None:

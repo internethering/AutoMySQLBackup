@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 from .auth import AuthContext
@@ -99,14 +101,20 @@ class DatabaseOps:
             if "*" not in tbl:
                 expanded.append(entry)
                 continue
-            like = tbl.replace("*", "%")
+            # "_" and "%" are LIKE wildcards themselves; escape them so only "*"
+            # matches arbitrary text (cache_* must not match "cacheXfoo").
+            # A literal backslash needs four: one level for the SQL string
+            # literal, one for the LIKE escape character.
+            like = (tbl.replace("\\", "\\\\\\\\").replace("%", "\\%")
+                    .replace("_", "\\_").replace("*", "%").replace("'", "''"))
+            schema = db.replace("\\", "\\\\").replace("'", "''")
             cmd = (
                 [self._cfg.mysql]
                 + self._base_args()
                 + [
                     "--batch", "--skip-column-names", "-e",
                     f"SELECT table_name FROM information_schema.tables "
-                    f"WHERE table_schema='{db}' AND table_name LIKE '{like}';",
+                    f"WHERE table_schema='{schema}' AND table_name LIKE '{like}';",
                 ]
             )
             r = subprocess.run(cmd, capture_output=True, text=True)
@@ -117,42 +125,53 @@ class DatabaseOps:
             expanded += [f"{db}.{t.strip()}" for t in r.stdout.splitlines() if t.strip()]
         self._cfg.table_exclude = expanded
 
-    def dump_databases(self, databases: list[str], dest: Path) -> int:
-        """Dump one or more databases into dest (compressed). Returns exit code."""
-        cmd = [self._cfg.mysql_dump] + self._dump_args() + databases
-        if self._cfg.dryrun:
-            LOG.info("[dryrun] %s | compress > %s", " ".join(cmd), dest)
-            return 0
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        return self._comp.pipe_compress(proc, dest)
+    def dump_databases(self, databases: list[str], dest: Path, compress: bool = True) -> int:
+        """Dump one or more databases into dest. Returns exit code.
 
-    def dump_databases_raw(self, databases: list[str]) -> bytes:
-        """Return uncompressed mysqldump output as bytes (used for diff generation).
-
-        Loads the entire dump into memory — only call this for differential backups
-        where the SQL text is needed for difflib comparison.  Use dump_databases()
-        for all other paths to keep memory usage flat.
+        compress=False writes plain SQL (used as diff input for differential
+        backups).
         """
         cmd = [self._cfg.mysql_dump] + self._dump_args() + databases
-        r = subprocess.run(cmd, capture_output=True)
-        if r.returncode != 0:
-            raise RuntimeError(f"mysqldump failed: {r.stderr.decode()}")
-        return r.stdout
+        return self._run_dump(cmd, dest, compress)
 
     def dump_schema(self, dest: Path) -> int:
         """Dump the full schema (all databases, routines, no data) into dest."""
-        cmd = [self._cfg.mysql_dump] + self._schema_args()
-        if self._cfg.dryrun:
-            LOG.info("[dryrun] %s | compress > %s", " ".join(cmd), dest)
-            return 0
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        return self._comp.pipe_compress(proc, dest)
+        return self._run_dump([self._cfg.mysql_dump] + self._schema_args(), dest)
 
     def dump_status(self, dest: Path) -> int:
         """Dump mysqlshow --status output into dest."""
-        cmd = [self._cfg.mysql_show] + self._status_args()
+        return self._run_dump([self._cfg.mysql_show] + self._status_args(), dest)
+
+    def _run_dump(self, cmd: list[str], dest: Path, compress: bool = True) -> int:
+        """Run cmd and write its (compressed) stdout to dest atomically.
+
+        Output goes to "<dest>.part" first and is renamed only on success, so a
+        failed or interrupted dump never leaves a file that the idempotency
+        check would mistake for a finished backup.
+        """
         if self._cfg.dryrun:
             LOG.info("[dryrun] %s | compress > %s", " ".join(cmd), dest)
             return 0
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        return self._comp.pipe_compress(proc, dest)
+        part = dest.with_name(dest.name + ".part")
+        # stderr goes to a temp file rather than a pipe: nobody reads the pipe
+        # while the dump runs, and a full pipe buffer would hang mysqldump.
+        with tempfile.TemporaryFile() as err:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err)
+            if compress:
+                rc = self._comp.pipe_compress(proc, part)
+            else:
+                with part.open("wb") as f:
+                    shutil.copyfileobj(proc.stdout, f, 1024 * 1024)  # type: ignore[arg-type]
+                proc.stdout.close()  # type: ignore[union-attr]
+                rc = proc.wait()
+            err.seek(0)
+            stderr = err.read().decode(errors="replace").strip()
+        tool = Path(cmd[0]).name
+        if rc != 0:
+            part.unlink(missing_ok=True)
+            LOG.error("%s failed (exit %d)%s", tool, rc, f": {stderr}" if stderr else "")
+            return rc
+        if stderr:
+            LOG.warning("%s: %s", tool, stderr)
+        part.replace(dest)
+        return 0

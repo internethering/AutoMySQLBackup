@@ -6,10 +6,15 @@ import logging
 import os
 import time
 from pathlib import Path
+from typing import Iterable
 
 from .config import Config
 
 LOG = logging.getLogger(__name__)
+
+# Bookkeeping files of differential backups; they are rewritten as needed and
+# must survive rotation even when their mtime is old.
+_NEVER_ROTATE = frozenset({"Manifest", "Manifest.lock"})
 
 
 class BackupDirectory:
@@ -56,22 +61,41 @@ class BackupDirectory:
         if self._cfg.dryrun:
             LOG.info("[dryrun] would clean %s", latest)
             return
+        if not latest.is_dir():
+            return
         for f in latest.iterdir():
             f.unlink(missing_ok=True)
 
-    def rotate(self, directory: Path, max_age_days: int) -> None:
-        """Delete files in directory older than max_age_days."""
+    def rotate(
+        self,
+        directory: Path,
+        max_age_days: int,
+        pattern: str = "*",
+        keep: Iterable[Path] = (),
+    ) -> None:
+        """Delete files matching pattern in directory older than max_age_days.
+
+        pattern restricts rotation to one backup kind when several share a
+        directory (fullschema/ and status/ hold daily, weekly and monthly
+        files side by side). Paths in keep are never deleted — used to retain
+        differential masters that newer diffs still depend on.
+        """
         if self._cfg.dryrun:
-            LOG.info("[dryrun] would rotate files older than %d days in %s",
-                     max_age_days, directory)
+            LOG.info("[dryrun] would rotate %s older than %d days in %s",
+                     pattern, max_age_days, directory)
+            return
+        if not directory.is_dir():
             return
         cutoff = time.time() - max_age_days * 86400
-        # rglob("*") descends into per-database subdirectories intentionally —
+        protected = {Path(p) for p in keep}
+        # rglob descends into per-database subdirectories intentionally —
         # use_separate_dirs creates one subdir per db inside each period directory.
         # st_mtime is the content write time; st_ctime would reflect inode changes
         # (chown, chmod) and could misidentify recently linked files as old.
-        for f in directory.rglob("*"):
-            if f.is_file() and f.stat().st_mtime < cutoff:
+        for f in directory.rglob(pattern):
+            if f.name in _NEVER_ROTATE or f in protected or not f.is_file():
+                continue
+            if f.stat().st_mtime < cutoff:
                 f.unlink()
                 LOG.debug("Rotated %s", f)
 
