@@ -3,7 +3,7 @@
 Automated MySQL/MariaDB backup tool with daily, weekly, and monthly rotation,
 differential backups, optional compression and encryption, and email notification.
 
-Originally a bash script (v1.0–3.0, 2002–2011). Rewritten in Python for v4.0.
+Originally a bash script (v1.0–3.0, 2002–2011). Rewritten in Python for v4.0 with Antrophic Claude.
 
 ## Requirements
 
